@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insider Game Online</title>
+    <style>
+        body { font-family: 'Kanit', sans-serif; text-align: center; background: #2c3e50; color: white; padding: 20px; }
+        .container { max-width: 400px; margin: auto; background: #34495e; padding: 20px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.3); }
+        input { width: 80%; padding: 10px; margin: 10px 0; border-radius: 5px; border: none; }
+        button { width: 85%; padding: 12px; margin: 10px 0; border-radius: 5px; border: none; background: #e67e22; color: white; font-weight: bold; cursor: pointer; }
+        button:hover { background: #d35400; }
+        .card { background: #ecf0f1; color: #2c3e50; padding: 20px; border-radius: 10px; margin-top: 20px; }
+        #word-box { font-size: 24px; color: #c0392b; font-weight: bold; }
+        ul { list-style: none; padding: 0; text-align: left; }
+        li { background: #2980b9; margin: 5px 0; padding: 8px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>INSIDER GAME</h1>
+
+    <div id="setup-area">
+        <input type="text" id="playerName" placeholder="ใส่ชื่อของคุณ">
+        <button onclick="joinGame()">เข้าสู่ห้องนั่งเล่น</button>
+    </div>
+
+    <div id="lobby-area" style="display:none;">
+        <h3>ผู้เล่นในห้อง:</h3>
+        <ul id="player-list"></ul>
+        <p>รอเพื่อนให้ครบ (4-10 คน)</p>
+        <button id="start-btn" onclick="masterStartGame()">เริ่มสุ่มบทบาท (Host เท่านั้น)</button>
+        <button onclick="clearAllPlayers()">ล้างห้อง</button>
+    </div>
+
+    <div id="game-area" style="display:none;">
+        <div class="card">
+            <h2>คุณคือ: <span id="my-role">กำลังโหลด...</span></h2>
+            <div id="word-display" style="display:none;">
+                <p>คำศัพท์ลับคือ:</p>
+                <div id="word-box"></div>
+            </div>
+            <p id="hint-text"></p>
+        </div>
+        <button onclick="resetGame()" style="background: #27ae60;">เริ่มรอบใหม่ (Back to Lobby)</button>
+        <button onclick="location.reload()">จบเกม / กลับหน้าแรก</button>
+    </div>
+</div>
+
+<script type="module">
+// เปลี่ยนจาก 10.7.1 เป็นเวอร์ชันที่เสถียรกว่า หรือใช้แบบนี้ครับ
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+    // --- คัดลอก firebaseConfig จากหน้าจอของคุณมาวางทับตรงนี้ ---
+    const firebaseConfig = {
+        apiKey: "AIzaSyAQDEhlQwRejSdEiUT6XKd_rpcZcjkgzw8",
+        authDomain: "insider-card-game.firebaseapp.com",
+        databaseURL: "https://insider-card-game-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "insider-card-game",
+        storageBucket: "insider-card-game.firebasestorage.app",
+        messagingSenderId: "586011166032",
+        appId: "1:586011166032:web:ceafcc3317c30a53435855",
+        measurementId: "G-ZR7SP3J1E5"
+    };
+    // ---------------------------------------------------
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const roomRef = ref(db, 'gameRoom');
+    let myName = "";
+
+    // 1. ฟังก์ชันจอยเกม
+    window.joinGame = function() {
+        let inputName = document.getElementById('playerName').value;
+        // ลบช่องว่างออก และตัดอักขระพิเศษที่ Firebase ไม่ชอบ
+        myName = inputName.replace(/[\s.#$/[\]]/g, ""); 
+        
+        if(!myName) return alert("กรุณาใส่ชื่อ (ห้ามมีช่องว่างหรือสัญลักษณ์)");
+        
+        set(ref(db, 'gameRoom/players/' + myName), { name: inputName, role: 'Waiting' });
+        document.getElementById('setup-area').style.display = 'none';
+        document.getElementById('lobby-area').style.display = 'block';
+    };
+
+    window.resetGame = async function() {
+        if(confirm("ต้องการเริ่มรอบใหม่สำหรับทุกคนใช่ไหม?")) {
+            try {
+                // แยกสั่ง set ทีละจุด เพื่อเลี่ยง Error เรื่องเครื่องหมาย / ใน Key
+                await set(ref(db, 'gameRoom/status'), "WAITING");
+                await set(ref(db, 'gameRoom/currentWord'), "");
+                
+                console.log("Reset successful - Everyone back to lobby");
+            } catch (error) {
+                console.error("Reset failed:", error);
+                alert("เกิดข้อผิดพลาดในการรีเซ็ตเกม");
+            }
+        }
+    };
+    window.clearAllPlayers = function() {
+        if(confirm("ต้องการลบรายชื่อผู้เล่นทุกคนเพื่อเริ่มใหม่ใช่ไหม?")) {
+            // ลบข้อมูลทั้งหมดใน players
+            set(ref(db, 'gameRoom/players'), null).then(() => {
+                alert("ล้างรายชื่อเรียบร้อยแล้ว ทุกคนต้องเข้าห้องใหม่ครับ");
+            });
+        }
+    };
+
+    // 2. อัปเดตรายชื่อคนในห้องแบบ Real-time
+    onValue(ref(db, 'gameRoom/players'), (snapshot) => {
+        const players = snapshot.val();
+        const list = document.getElementById('player-list');
+        list.innerHTML = "";
+        if(players) {
+            Object.values(players).forEach(p => {
+                let li = document.createElement('li');
+                li.innerText = p.name;
+                list.appendChild(li);
+            });
+        }
+    });
+
+    // 3. ฟังก์ชันสุ่ม (สำหรับคนที่เป็นคนกดเริ่มเกมคนแรก)
+    window.masterStartGame = async function() {
+        const snapshot = await get(ref(db, 'gameRoom/players'));
+        const players = snapshot.val();
+        
+        if (!players) return alert("ไม่มีผู้เล่นในห้อง");
+        const names = Object.keys(players);
+        
+        if (names.length < 2) return alert("ต้องมีอย่างน้อย 2 คน");
+
+        const words = ["จักรยาน", "ดาวหาง", "ภูเขาไฟ", "ตู้เย็น", "ร่ม", "เตารีด", "นาฬิกาทราย"];
+        const selectedWord = words[Math.floor(Math.random() * words.length)];
+
+        // 1. สุ่มลำดับชื่อ
+        const shuffled = names.sort(() => 0.5 - Math.random());
+        
+        // 2. วนลูปอัปเดตบทบาททีละคน (แยกคำสั่ง set เพื่อลด Error เรื่อง Key)
+        for (let i = 0; i < shuffled.length; i++) {
+            let role = "Normal";
+            if (i === 0) role = "Host";
+            if (i === 1) role = "Insider";
+            
+            // อัปเดตบทบาทของผู้เล่นคนนั้นๆ
+            await set(ref(db, `gameRoom/players/${shuffled[i]}/role`), role);
+        }
+        
+        // 3. อัปเดตคำศัพท์และสถานะเริ่มเกม
+        await set(ref(db, 'gameRoom/currentWord'), selectedWord);
+        await set(ref(db, 'gameRoom/status'), "START");
+        
+        console.log("Game Started Successfully!");
+    };
+
+    // 4. คอยดูสถานะเกม
+    onValue(ref(db, 'gameRoom'), (snapshot) => {
+        const data = snapshot.val();
+        if(!data) return;
+
+        if(data.status === "START") {
+            const myData = data.players[myName];
+            if(myData) {
+                document.getElementById('lobby-area').style.display = 'none';
+                document.getElementById('game-area').style.display = 'block';
+                document.getElementById('my-role').innerText = myData.role;
+                
+                // ตรวจสอบบทบาทเพื่อแสดงคำศัพท์
+                if(myData.role === "Host" || myData.role === "Insider") {
+                    document.getElementById('word-display').style.display = 'block';
+                    document.getElementById('word-box').innerText = data.currentWord;
+                } else {
+                    document.getElementById('word-display').style.display = 'none';
+                }
+            }
+        } 
+        // เมื่อสถานะกลับเป็น WAITING (ถูก Reset)
+        else if(data.status === "WAITING" || !data.status) {
+            document.getElementById('game-area').style.display = 'none';
+            document.getElementById('lobby-area').style.display = 'block';
+            
+            // ล้างข้อมูลหน้าจอเดิมออกให้หมด เพื่อเตรียมพร้อมรอบใหม่
+            document.getElementById('my-role').innerText = "กำลังรอสุ่ม...";
+            document.getElementById('word-box').innerText = "";
+            document.getElementById('word-display').style.display = 'none';
+        }
+    });
+</script>
+</body>
+</html>
