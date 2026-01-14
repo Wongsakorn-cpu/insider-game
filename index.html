@@ -14,6 +14,7 @@
         #word-box { font-size: 24px; color: #c0392b; font-weight: bold; }
         ul { list-style: none; padding: 0; text-align: left; }
         li { background: #2980b9; margin: 5px 0; padding: 8px; border-radius: 5px; }
+        .stats { font-size: 12px; color: #bdc3c7; margin-top: 10px; }
     </style>
 </head>
 <body>
@@ -31,7 +32,8 @@
         <ul id="player-list"></ul>
         <p>รอเพื่อนให้ครบ (4-10 คน)</p>
         <button id="start-btn" onclick="masterStartGame()">เริ่มสุ่มบทบาท (Host เท่านั้น)</button>
-        <button onclick="clearAllPlayers()">ล้างห้อง</button>
+        <button onclick="clearAllPlayers()">ล้างห้อง & รีเซ็ตคำศัพท์</button>
+        <div class="stats" id="word-stats"></div>
     </div>
 
     <div id="game-area" style="display:none;">
@@ -52,7 +54,7 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-    // --- คัดลอก firebaseConfig จากหน้าจอของคุณมาวางทับตรงนี้ ---
+    // --- คัดลอก firebaseConfig มาวางทับตรงนี้ ---
     const firebaseConfig = {
         apiKey: "AIzaSyAQDEhlQwRejSdEiUT6XKd_rpcZcjkgzw8",
         authDomain: "insider-card-game.firebaseapp.com",
@@ -69,7 +71,23 @@
     const db = getDatabase(app);
     let myName = "";
 
-    // 1. ฟังก์ชันจอยเกม
+    // รายการคำศัพท์ทั้งหมด (Master List)
+    const allWords = [
+        // หมวดของใช้
+        "จักรยาน", "ดาวหาง", "ภูเขาไฟ", "ตู้เย็น", "ร่ม", "เตารีด", "นาฬิกาทราย",
+        "เครื่องซักผ้า", "ไมโครเวฟ", "กล้องถ่ายรูป", "หูฟัง", "กระติกน้ำร้อน",
+        "แว่นกันแดด", "แปรงสีฟัน", "หม้อหุงข้าว", "โทรทัศน์", "โคมไฟ",
+        "น้ำตก", "ทะเลทราย", "สนามบิน", "ห้องสมุด", "สวนสนุก",
+        "ถ้ำสะท้อนแสง", "สถานีอวกาศ", "พิพิธภัณฑ์", "ป่าชายเลน", "ห้างสรรพสินค้า",
+        // หมวดสัตว์
+        "สิงโต", "จิงโจ้", "เพนกวิน", "ช้าง", "งูหลาม", "แมงมุม", "วาฬสีน้ำเงิน",
+        "ยีราฟ", "ฮิปโป", "นกแก้ว", "เต่าทะเล", "กระรอก", "ม้าน้ำ", "กิ้งก่า",
+        // หมวดอาหาร
+        "ต้มยำกุ้ง", "พิซซ่า", "ซูชิ", "แฮมเบอร์เกอร์", "ข้าวเหนียวมะม่วง",
+        "ส้มตำ", "ทุเรียน", "ไอศกรีม", "ขนมครก", "ผัดไทย", "ชานมไข่มุก",
+        "ครัวซองต์", "ไก่ทอด", "หมูกระทะ"
+    ];
+
     window.joinGame = function() {
         let inputName = document.getElementById('playerName').value;
         myName = inputName.replace(/[\s.#$/[\]]/g, ""); 
@@ -82,42 +100,22 @@
     };
 
     window.resetGame = async function() {
-        if(confirm("ต้องการเริ่มรอบใหม่สำหรับทุกคนใช่ไหม?")) {
-            try {
-                // เปลี่ยนสถานะเป็น Waiting แต่ยังไม่ลบ CurrentWord เพื่อเอาไว้เช็คกันซ้ำรอบหน้า
-                await set(ref(db, 'gameRoom/status'), "WAITING");
-            } catch (error) {
-                console.error("Reset failed:", error);
-            }
+        if(confirm("ต้องการเริ่มรอบใหม่ใช่ไหม?")) {
+            await set(ref(db, 'gameRoom/status'), "WAITING");
         }
     };
 
     window.clearAllPlayers = function() {
-        if(confirm("ต้องการลบรายชื่อผู้เล่นทุกคนเพื่อเริ่มใหม่ใช่ไหม?")) {
-            set(ref(db, 'gameRoom/players'), null).then(() => {
-                set(ref(db, 'gameRoom/currentWord'), ""); // ล้างคำศัพท์ด้วยเมื่อล้างห้อง
-                alert("ล้างรายชื่อเรียบร้อยแล้ว ทุกคนต้องเข้าห้องใหม่ครับ");
-            });
+        if(confirm("ต้องการลบรายชื่อผู้เล่น และรีเซ็ตประวัติคำศัพท์ใหม่หมดเลยไหม?")) {
+            set(ref(db, 'gameRoom/players'), null);
+            set(ref(db, 'gameRoom/currentWord'), "");
+            set(ref(db, 'gameRoom/usedWords'), null); // ล้างประวัติคำที่เคยใช้
+            alert("ล้างห้องและรีเซ็ตคำศัพท์เรียบร้อย");
         }
     };
 
-    // 2. อัปเดตรายชื่อคนในห้องแบบ Real-time
-    onValue(ref(db, 'gameRoom/players'), (snapshot) => {
-        const players = snapshot.val();
-        const list = document.getElementById('player-list');
-        list.innerHTML = "";
-        if(players) {
-            Object.values(players).forEach(p => {
-                let li = document.createElement('li');
-                li.innerText = p.name;
-                list.appendChild(li);
-            });
-        }
-    });
-
-    // 3. ฟังก์ชันสุ่ม (แก้ไขใหม่: เพิ่มคำศัพท์ + กันคำซ้ำ)
+    // 3. ฟังก์ชันสุ่ม (แก้ไขใหม่: วนจนครบทุกคำ)
     window.masterStartGame = async function() {
-        // ดึงข้อมูลทั้งห้องมาก่อน เพื่อดูทั้งผู้เล่น และ คำศัพท์เก่า
         const snapshot = await get(ref(db, 'gameRoom'));
         const roomData = snapshot.val();
         
@@ -125,61 +123,64 @@
         
         const players = roomData.players;
         const names = Object.keys(players);
-        const previousWord = roomData.currentWord || ""; // คำศัพท์รอบที่แล้ว
         
+        // ดึงรายการคำที่ใช้ไปแล้วจาก DB (ถ้าไม่มีให้เป็น Array ว่าง)
+        let usedWords = roomData.usedWords || [];
+
         if (names.length < 2) return alert("ต้องมีอย่างน้อย 2 คน");
 
-        // --- เพิ่มรายการคำศัพท์ตรงนี้ ---
-        const words = [
-            // หมวดของใช้ทั่วไป
-            "จักรยาน", "ดาวหาง", "ภูเขาไฟ", "ตู้เย็น", "ร่ม", "เตารีด", "นาฬิกาทราย",
-            "เครื่องซักผ้า", "ไมโครเวฟ", "กล้องถ่ายรูป", "หูฟัง", "กระติกน้ำร้อน",
-            "แว่นกันแดด", "แปรงสีฟัน", "หม้อหุงข้าว", "โทรทัศน์", "โคมไฟ",
-            "น้ำตก", "ทะเลทราย", "สนามบิน", "ห้องสมุด", "สวนสนุก",
-            "ถ้ำสะท้อนแสง", "สถานีอวกาศ", "พิพิธภัณฑ์", "ป่าชายเลน", "ห้างสรรพสินค้า",
-            
-            // หมวดสัตว์ (ใหม่)
-            "สิงโต", "จิงโจ้", "เพนกวิน", "ช้าง", "งูหลาม", "แมงมุม", "วาฬสีน้ำเงิน",
-            "ยีราฟ", "ฮิปโป", "นกแก้ว", "เต่าทะเล", "กระรอก", "ม้าน้ำ", "กิ้งก่า",
-            
-            // หมวดอาหาร (ใหม่)
-            "ต้มยำกุ้ง", "พิซซ่า", "ซูชิ", "แฮมเบอร์เกอร์", "ข้าวเหนียวมะม่วง",
-            "ส้มตำ", "ทุเรียน", "ไอศกรีม", "ขนมครก", "ผัดไทย", "ชานมไข่มุก",
-            "ครัวซองต์", "ไก่ทอด", "หมูกระทะ"
-        ];
+        // 1. หาคำที่ยังเหลืออยู่ (Available Words)
+        let availableWords = allWords.filter(word => !usedWords.includes(word));
 
-        // --- Logic สุ่มแบบไม่ซ้ำ ---
-        let selectedWord;
+        // 2. ถ้าคำหมดแล้ว (เหลือ 0) ให้รีเซ็ตใหม่ เอาทุกคำกลับมา
+        if (availableWords.length === 0) {
+            alert("เล่นครบทุกคำแล้ว! ระบบจะเริ่มวนคำใหม่ครับ");
+            availableWords = [...allWords];
+            usedWords = []; // เคลียร์ประวัติ
+        }
+
+        // 3. สุ่มคำจากรายการที่เหลือ
+        const selectedWord = availableWords[Math.floor(Math.random() * availableWords.length)];
         
-        // กรองคำศัพท์: เอาคำเก่าออกจากรายการสุ่ม (ถ้ามี)
-        const availableWords = words.filter(w => w !== previousWord);
+        // 4. เพิ่มคำที่สุ่มได้ลงในประวัติ usedWords
+        usedWords.push(selectedWord);
 
-        // สุ่มจากรายการที่กรองแล้ว
-        selectedWord = availableWords[Math.floor(Math.random() * availableWords.length)];
-        
-        console.log(`Previous: ${previousWord}, New: ${selectedWord}`); // เช็คใน Console ได้
+        // 5. บันทึกข้อมูลลง Firebase
+        await set(ref(db, 'gameRoom/currentWord'), selectedWord);
+        await set(ref(db, 'gameRoom/usedWords'), usedWords);
 
-        // 1. สุ่มลำดับชื่อ
+        // --- ส่วนสุ่มบทบาท (เหมือนเดิม) ---
         const shuffled = names.sort(() => 0.5 - Math.random());
-        
-        // 2. วนลูปอัปเดตบทบาท
         for (let i = 0; i < shuffled.length; i++) {
             let role = "Normal";
             if (i === 0) role = "Host";
             if (i === 1) role = "Insider";
-            
             await set(ref(db, `gameRoom/players/${shuffled[i]}/role`), role);
         }
         
-        // 3. อัปเดตคำศัพท์และสถานะเริ่มเกม
-        await set(ref(db, 'gameRoom/currentWord'), selectedWord);
         await set(ref(db, 'gameRoom/status'), "START");
     };
 
-    // 4. คอยดูสถานะเกม
+    // 4. Real-time Update
     onValue(ref(db, 'gameRoom'), (snapshot) => {
         const data = snapshot.val();
         if(!data) return;
+
+        // อัปเดตรายชื่อ
+        const list = document.getElementById('player-list');
+        list.innerHTML = "";
+        if(data.players) {
+            Object.values(data.players).forEach(p => {
+                let li = document.createElement('li');
+                li.innerText = p.name;
+                list.appendChild(li);
+            });
+        }
+        
+        // แสดงสถานะคำศัพท์ (เหลืออีกกี่คำ)
+        const usedCount = data.usedWords ? data.usedWords.length : 0;
+        const totalCount = allWords.length;
+        document.getElementById('word-stats').innerText = `ใช้คำไปแล้ว ${usedCount}/${totalCount} คำ`;
 
         if(data.status === "START") {
             const myData = data.players[myName];
