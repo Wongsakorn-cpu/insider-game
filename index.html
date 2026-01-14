@@ -49,7 +49,6 @@
 </div>
 
 <script type="module">
-// เปลี่ยนจาก 10.7.1 เป็นเวอร์ชันที่เสถียรกว่า หรือใช้แบบนี้ครับ
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
     import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
@@ -68,13 +67,11 @@
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
-    const roomRef = ref(db, 'gameRoom');
     let myName = "";
 
     // 1. ฟังก์ชันจอยเกม
     window.joinGame = function() {
         let inputName = document.getElementById('playerName').value;
-        // ลบช่องว่างออก และตัดอักขระพิเศษที่ Firebase ไม่ชอบ
         myName = inputName.replace(/[\s.#$/[\]]/g, ""); 
         
         if(!myName) return alert("กรุณาใส่ชื่อ (ห้ามมีช่องว่างหรือสัญลักษณ์)");
@@ -87,21 +84,18 @@
     window.resetGame = async function() {
         if(confirm("ต้องการเริ่มรอบใหม่สำหรับทุกคนใช่ไหม?")) {
             try {
-                // แยกสั่ง set ทีละจุด เพื่อเลี่ยง Error เรื่องเครื่องหมาย / ใน Key
+                // เปลี่ยนสถานะเป็น Waiting แต่ยังไม่ลบ CurrentWord เพื่อเอาไว้เช็คกันซ้ำรอบหน้า
                 await set(ref(db, 'gameRoom/status'), "WAITING");
-                await set(ref(db, 'gameRoom/currentWord'), "");
-                
-                console.log("Reset successful - Everyone back to lobby");
             } catch (error) {
                 console.error("Reset failed:", error);
-                alert("เกิดข้อผิดพลาดในการรีเซ็ตเกม");
             }
         }
     };
+
     window.clearAllPlayers = function() {
         if(confirm("ต้องการลบรายชื่อผู้เล่นทุกคนเพื่อเริ่มใหม่ใช่ไหม?")) {
-            // ลบข้อมูลทั้งหมดใน players
             set(ref(db, 'gameRoom/players'), null).then(() => {
+                set(ref(db, 'gameRoom/currentWord'), ""); // ล้างคำศัพท์ด้วยเมื่อล้างห้อง
                 alert("ล้างรายชื่อเรียบร้อยแล้ว ทุกคนต้องเข้าห้องใหม่ครับ");
             });
         }
@@ -121,43 +115,65 @@
         }
     });
 
-    // 3. ฟังก์ชันสุ่ม (สำหรับคนที่เป็นคนกดเริ่มเกมคนแรก)
+    // 3. ฟังก์ชันสุ่ม (แก้ไขใหม่: เพิ่มคำศัพท์ + กันคำซ้ำ)
     window.masterStartGame = async function() {
-        const snapshot = await get(ref(db, 'gameRoom/players'));
-        const players = snapshot.val();
+        // ดึงข้อมูลทั้งห้องมาก่อน เพื่อดูทั้งผู้เล่น และ คำศัพท์เก่า
+        const snapshot = await get(ref(db, 'gameRoom'));
+        const roomData = snapshot.val();
         
-        if (!players) return alert("ไม่มีผู้เล่นในห้อง");
+        if (!roomData || !roomData.players) return alert("ไม่มีผู้เล่นในห้อง");
+        
+        const players = roomData.players;
         const names = Object.keys(players);
+        const previousWord = roomData.currentWord || ""; // คำศัพท์รอบที่แล้ว
         
         if (names.length < 2) return alert("ต้องมีอย่างน้อย 2 คน");
 
+        // --- เพิ่มรายการคำศัพท์ตรงนี้ ---
         const words = [
+            // หมวดของใช้ทั่วไป
             "จักรยาน", "ดาวหาง", "ภูเขาไฟ", "ตู้เย็น", "ร่ม", "เตารีด", "นาฬิกาทราย",
             "เครื่องซักผ้า", "ไมโครเวฟ", "กล้องถ่ายรูป", "หูฟัง", "กระติกน้ำร้อน",
             "แว่นกันแดด", "แปรงสีฟัน", "หม้อหุงข้าว", "โทรทัศน์", "โคมไฟ",
             "น้ำตก", "ทะเลทราย", "สนามบิน", "ห้องสมุด", "สวนสนุก",
-            "ถ้ำสะท้อนแสง", "สถานีอวกาศ", "พิพิธภัณฑ์", "ป่าชายเลน", "ห้างสรรพสินค้า"
+            "ถ้ำสะท้อนแสง", "สถานีอวกาศ", "พิพิธภัณฑ์", "ป่าชายเลน", "ห้างสรรพสินค้า",
+            
+            // หมวดสัตว์ (ใหม่)
+            "สิงโต", "จิงโจ้", "เพนกวิน", "ช้าง", "งูหลาม", "แมงมุม", "วาฬสีน้ำเงิน",
+            "ยีราฟ", "ฮิปโป", "นกแก้ว", "เต่าทะเล", "กระรอก", "ม้าน้ำ", "กิ้งก่า",
+            
+            // หมวดอาหาร (ใหม่)
+            "ต้มยำกุ้ง", "พิซซ่า", "ซูชิ", "แฮมเบอร์เกอร์", "ข้าวเหนียวมะม่วง",
+            "ส้มตำ", "ทุเรียน", "ไอศกรีม", "ขนมครก", "ผัดไทย", "ชานมไข่มุก",
+            "ครัวซองต์", "ไก่ทอด", "หมูกระทะ"
         ];
-        const selectedWord = words[Math.floor(Math.random() * words.length)];
+
+        // --- Logic สุ่มแบบไม่ซ้ำ ---
+        let selectedWord;
+        
+        // กรองคำศัพท์: เอาคำเก่าออกจากรายการสุ่ม (ถ้ามี)
+        const availableWords = words.filter(w => w !== previousWord);
+
+        // สุ่มจากรายการที่กรองแล้ว
+        selectedWord = availableWords[Math.floor(Math.random() * availableWords.length)];
+        
+        console.log(`Previous: ${previousWord}, New: ${selectedWord}`); // เช็คใน Console ได้
 
         // 1. สุ่มลำดับชื่อ
         const shuffled = names.sort(() => 0.5 - Math.random());
         
-        // 2. วนลูปอัปเดตบทบาททีละคน (แยกคำสั่ง set เพื่อลด Error เรื่อง Key)
+        // 2. วนลูปอัปเดตบทบาท
         for (let i = 0; i < shuffled.length; i++) {
             let role = "Normal";
             if (i === 0) role = "Host";
             if (i === 1) role = "Insider";
             
-            // อัปเดตบทบาทของผู้เล่นคนนั้นๆ
             await set(ref(db, `gameRoom/players/${shuffled[i]}/role`), role);
         }
         
         // 3. อัปเดตคำศัพท์และสถานะเริ่มเกม
         await set(ref(db, 'gameRoom/currentWord'), selectedWord);
         await set(ref(db, 'gameRoom/status'), "START");
-        
-        console.log("Game Started Successfully!");
     };
 
     // 4. คอยดูสถานะเกม
@@ -172,7 +188,6 @@
                 document.getElementById('game-area').style.display = 'block';
                 document.getElementById('my-role').innerText = myData.role;
                 
-                // ตรวจสอบบทบาทเพื่อแสดงคำศัพท์
                 if(myData.role === "Host" || myData.role === "Insider") {
                     document.getElementById('word-display').style.display = 'block';
                     document.getElementById('word-box').innerText = data.currentWord;
@@ -181,12 +196,10 @@
                 }
             }
         } 
-        // เมื่อสถานะกลับเป็น WAITING (ถูก Reset)
         else if(data.status === "WAITING" || !data.status) {
             document.getElementById('game-area').style.display = 'none';
             document.getElementById('lobby-area').style.display = 'block';
             
-            // ล้างข้อมูลหน้าจอเดิมออกให้หมด เพื่อเตรียมพร้อมรอบใหม่
             document.getElementById('my-role').innerText = "กำลังรอสุ่ม...";
             document.getElementById('word-box').innerText = "";
             document.getElementById('word-display').style.display = 'none';
